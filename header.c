@@ -75,6 +75,7 @@ const __unit_header genericfx_unit_header_t unit_header = {
          // 0 - 250 HZ
          // default min 0.05hz 20 seconds
          // default max 0.3hz 3.33 seconds
+         // 0 - 1 second
          {0, 200, 0, 1, k_unit_param_type_hertz, 2, 1, 0, {"min lfo hz"}},
          {0, 2000, 0, 6, k_unit_param_type_hertz, 2, 1, 0, {"max lfo hz"}},
  

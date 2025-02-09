@@ -98,6 +98,7 @@ class LRMultiReadCircularBuffer {
 }; 
 
 
+// TODO clean this up good lord
 class DelayLine {
    public:
       DelayLine() {}
@@ -106,21 +107,65 @@ class DelayLine {
          this->msDelay = msDelay;
          this->buffer = buffer;
          this->buffer_len = buffer_len;
+         this->half_buffer_len = buffer_len/2.0;
 
-         setDelay(msDelay);
+         this->readHeadPos = -msDelay;
+         this->sampleDelay = calculateSampleOffset(msDelay);
       }
 
-      void setDelay(float ms) {
+      void setDelay(float msDelay) {
+         this->delay_changing = true;
+         // TODO update playhead speed accordingly, probably in Process() to be safe
+         this->newSampleDelay = calculateSampleOffset(msDelay);
+         //this-
+      }
+
+      /* void setDelay(float ms) {
          this->sampleDelay = ms * SAMPLE_RATE_KHZ;
-         this->readHeadPos = this->buffer->write_idx - sampleDelay;
+         float pos = fmod(static_cast<float>(this->buffer->write_idx) - sampleDelay*2.0 + static_cast<float>(buffer_len), buffer_len)/2.0;
+         
+         if (this->readHeadPos == -1) {
+            this->readHeadPos = pos;
+         } else {
+            this->delay_changing = true;
+            this->
+         }
+
+         this->readHeadPos = ;
+      } */
+
+      float getSpeed() {
+         return this->readHeadSpeed;
       }
 
       void setSpeed(float speed) {
-         this->readHeadSpeed = speed;
+         // TODO ALSO!!! add boundary handling, check the write idx etc etc
+         if (!this->delay_changing) // uhh fix this
+            this->readHeadSpeed = speed;
       }
 
       f32pair_t Process() {
          float tempReadHeadPos = readHeadPos;
+
+         if (delay_changing) {
+            // compare current write head distance 
+            // to desired distance for new delay
+            // adjust readHeadSpeed accordingly
+            float currentDistance = calculateDistanceFromWriteHead();
+
+            // TODO ease here
+            if (currentDistance < this->newSampleDelay - 8) { // read head ahead of new delay time, slow down
+               readHeadSpeed -= 0.00002; // 1/
+            } else if (currentDistance > this->newSampleDelay + 8) {
+               readHeadSpeed += 0.00002;
+            } else {
+               this->sampleDelay = newSampleDelay;
+               readHeadSpeed = 1;
+               readHeadPos += currentDistance - newSampleDelay;
+
+               delay_changing = false;
+            }
+         }
 
          readHeadPos+=readHeadSpeed;
          readHeadPos = fmod(readHeadPos, buffer_len/2);
@@ -154,10 +199,28 @@ class DelayLine {
       LRMultiReadCircularBuffer *buffer;
       int buffer_len;
       float sampleDelay;
+      float doubleSampleDelay;
+      float half_buffer_len;
 
       // buffer is two channel stored in 1d, this pos is index of 2D LR sample!!!!!!!!!!!!
-      float readHeadPos;
+      float readHeadPos = -1;
       float readHeadSpeed = 1.0;
+
+
+      bool delay_changing = false;
+      float newSampleDelay = false;
+
+      // how many samples to look behind write head for given time
+      float calculateSampleOffset(float msDelay) {
+         return msDelay * SAMPLE_RATE_KHZ;
+      }
+
+      // current sample offset from write head
+      float calculateDistanceFromWriteHead() {
+         return fmod(buffer->write_idx/2 + half_buffer_len - readHeadPos, half_buffer_len);
+         //return (buffer->write_idx/2 + half_buffer_len - readHeadPos)%half_buffer_len;
+         //return fmod(static_cast<float>(this->buffer->write_idx) / 2.0 - this->readHeadPos + half_buffer_len /, half_buffer_len);
+      }
 };
 
 class Oscillator {
@@ -303,24 +366,32 @@ class Effect {
       // 100 441 77
 
       for (int x = 0; x < 6; x++) {
-         dls[x].Init(60*x+1, &buffer, BUFFER_LENGTH);
+         //dls[x].Init(60*x+1, &buffer, BUFFER_LENGTH);
+         dls[x].Init(60*(x+1), &buffer, BUFFER_LENGTH);
          lfos[x].setFrequency(params_.minLFOHz);
       }
 
-      //setDelays(params_.minDelayMs, params_.maxDelayMs, params_.numCopies);
+      setDelays(params_.minDelayMs, params_.maxDelayMs, params_.numCopies);
 
       buffer.Init(m, BUFFER_LENGTH);
-
-      fx_rand();
 
       return k_unit_err_none;
    }
 
    inline void setDelays(float min, float max, float num) {
+      if (num == 1)
+         return dls[0].setDelay(min);
+
       float increment = (max-min)/(num-1.0);
 
       for (float x = 0; x < 6; x++) {
          dls[(int)x].setDelay(min+increment*x);
+      }
+   }
+
+   inline void setLFOs(float min, float max) {
+      for (int x = 0; x < 6; x++) {
+         lfos[x].setFrequency(fx_rand()/UINT_MAX * (max-min) + min);
       }
    }
 
@@ -386,7 +457,7 @@ class Effect {
             //del_r += dls[x].Process();
 
             
-            dls[x].setSpeed(1.0 + lfos[x].next()*p.lfoScale*0.5);
+            dls[x].setSpeed(1.0 - lfos[x].next()*p.lfoScale*0.5);
          }
 
          out_l = ((1-p.mix) * in_l) + (p.mix * del_l / p.numCopies);
@@ -445,6 +516,7 @@ class Effect {
          case MIN_LFO_HZ:
             value = clipminmaxi32(0, value, 5000);
             params_.minLFOHz = value / 20.0;
+            setLFOs(params_.minLFOHz, params_.maxLFOHz);
             break;
 
          case MAX_LFO_HZ:
@@ -464,6 +536,7 @@ class Effect {
             break;
 
          case LFO_SCALE:
+            //return params_.lfoScale;
             return params_.lfoScale * 2000.0;
             break;
 
